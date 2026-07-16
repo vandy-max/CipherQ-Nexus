@@ -218,6 +218,18 @@ def rbac_allowed(role, privilege_level, resource, operation):
     if operation not in OPERATIONS:
         return False, f"Unknown operation '{operation}'.", None
 
+    # SYSTEM_ADMIN has unconditional access to every resource/operation.
+    # Previously SYSTEM_ADMIN was just another row in RBAC_MATRIX with the
+    # same gaps as everyone else — e.g. no MODIFY/DELETE/EXPORT on
+    # CUSTOMER_RECORDS or TRANSACTIONS, no APPROVE anywhere — so an admin
+    # access request for those combinations was denied exactly like a
+    # BANK_EMPLOYEE's would be. This bypass makes the admin role the one
+    # role that's never blocked by an incomplete matrix entry. Every other
+    # role is completely unaffected — still governed strictly by
+    # RBAC_MATRIX below, unchanged.
+    if role == "SYSTEM_ADMIN":
+        return True, None, ROLE_DEFAULT_PRIVILEGE["SYSTEM_ADMIN"]
+
     role_grants = RBAC_MATRIX.get(role, {})
     resource_grants = role_grants.get(resource, {})
     required = resource_grants.get(operation)
@@ -241,7 +253,14 @@ def add_cors_headers(resp):
         resp.headers["Access-Control-Allow-Origin"] = origin
         resp.headers["Vary"] = "Origin"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    # PATCH was missing here — it's the method /api/admin/users/<id>/role
+    # uses (the only PATCH endpoint in this app). The browser preflights
+    # any PATCH request that carries a JSON body + Authorization header,
+    # and without PATCH listed here it blocks the real request before it
+    # ever reaches the server — that's what surfaced in the browser as a
+    # bare "Failed to fetch" when changing a user's role from the SOC
+    # dashboard, with nothing showing up in the backend logs at all.
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
     resp.headers["Access-Control-Allow-Credentials"] = "true"
     return resp
 
@@ -369,9 +388,16 @@ def register():
         return jsonify({"error": "password must be at least 4 characters"}), 400
 
     db = get_db()
-    existing = db.users.find_one({"username": username})
-    if existing:
+    if db.users.find_one({"username": username}):
         return jsonify({"error": "username already taken"}), 409
+    # `email` also has a unique index (see db.py init_indexes) but was never
+    # checked here before insert — a collision surfaced only as a generic
+    # DuplicateKeyError in the `except Exception` below, which was then
+    # reported to the user as "username already taken" even when the
+    # username was fine and it was the email that collided. Check it
+    # explicitly so the error is accurate.
+    if email and db.users.find_one({"email": email}):
+        return jsonify({"error": "an account with that email already exists"}), 409
 
     # Self-service registration is ALWAYS assigned the lowest-privilege
     # banking role (BANK_EMPLOYEE, privilege level 1) — a person can never
@@ -397,8 +423,16 @@ def register():
             "created_at": now_iso(),
         })
     except Exception:
-        # Backstop against a race with the unique index on `username`.
-        return jsonify({"error": "username already taken"}), 409
+        # Backstop against a race with the unique indexes on `username` and
+        # `email` (two concurrent requests both passing the pre-checks
+        # above). We can't cheaply tell which index fired from a generic
+        # DuplicateKeyError here, so re-check which field actually
+        # collided now and report that instead of guessing "username".
+        if db.users.find_one({"username": username}):
+            return jsonify({"error": "username already taken"}), 409
+        if email and db.users.find_one({"email": email}):
+            return jsonify({"error": "an account with that email already exists"}), 409
+        return jsonify({"error": "registration failed — please try again"}), 409
 
     user = {
         "id": uid, "username": username, "email": email,
@@ -776,12 +810,31 @@ def verify_session():
     the account it names (e.g. if the row were removed), so this closes
     that gap before any intent binding or encryption happens."""
     db = get_db()
-    row = db.users.find_one({"_id": g.user_id}, {"username": 1, "email": 1})
+    row = db.users.find_one(
+        {"_id": g.user_id},
+        {"username": 1, "email": 1, "role": 1, "department": 1, "privilege_level": 1},
+    )
     if not row:
         log_event(g.user_id, "session_verification_failed", {}, risk_level="HIGH")
         return jsonify({"verified": False, "reason": "This session no longer maps to a registered account."}), 401
     log_event(row["_id"], "session_verified", {"stage": "secure_send_entry"})
-    return jsonify({"verified": True, "user": {"id": row["_id"], "username": row["username"], "email": row.get("email")}})
+    # role/department/privilege_level are included (not just username/email)
+    # so the frontend can resync its cached user object here too — this is
+    # what keeps Sidebar/App page-gating in sync after an admin changes a
+    # user's role while that user is still logged in (see App.jsx). This
+    # endpoint previously only confirmed the account still exists and
+    # omitted these fields, so a promoted/demoted user's role stayed stale
+    # in localStorage until they logged out and back in, even though every
+    # backend request already re-checked g.role fresh from the DB.
+    return jsonify({
+        "verified": True,
+        "user": {
+            "id": row["_id"], "username": row["username"], "email": row.get("email"),
+            "role": row.get("role") or "BANK_EMPLOYEE",
+            "department": row.get("department") or "General Banking",
+            "privilege_level": row.get("privilege_level") if row.get("privilege_level") is not None else 1,
+        },
+    })
 
 
 @app.route("/api/users", methods=["GET"])
@@ -1155,11 +1208,21 @@ def rbac_catalog():
 
 @app.route("/api/rbac/validate", methods=["POST"])
 @auth_required
+@require_role("SYSTEM_ADMIN")
 def rbac_validate():
     """Explicit RBAC/Privilege Validation step, run right after the user
     selects a resource, operation, and declares their business intent —
     before any intent-binding/quantum/risk work begins. Denials here stop
-    the workflow immediately; nothing downstream ever runs."""
+    the workflow immediately; nothing downstream ever runs.
+
+    SYSTEM_ADMIN only. Every other role's Access Request flow skips this
+    preview call and goes straight from session verification to intent
+    binding (see AccessRequestPage.jsx) — RBAC is NOT weakened by this:
+    /api/access-requests below re-runs rbac_allowed() from scratch and
+    independently for every role regardless of what happens here, so this
+    endpoint being admin-only only removes an early preview/stop step for
+    non-admins, not actual enforcement.
+    """
     data = request.get_json(force=True, silent=True) or {}
     resource = (data.get("resource") or "").strip().upper()
     operation = (data.get("operation") or "").strip().upper()

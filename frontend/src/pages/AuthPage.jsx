@@ -3,54 +3,35 @@ import { Eye, EyeOff, ShieldHalf, ShieldCheck, Fingerprint, Atom, ScanFace, Lock
 import { login, register, faceEnroll } from "../services/api";
 import FaceCapture from "../components/FaceCapture";
 
-const LOGIN_ASSURANCES = [
+const ASSURANCES = [
   { icon: ShieldCheck, label: "RBAC enforced server-side, on every request" },
   { icon: Fingerprint,  label: "Intent-bound — every action requires a declared purpose" },
   { icon: Atom,         label: "BB84 quantum-safe key exchange, real Qiskit circuits" },
   { icon: ScanFace,     label: "Mandatory face identity verification, both directions" },
 ];
 
-const REGISTER_ASSURANCES = [
-  { icon: ShieldCheck, label: "Backend-Enforced RBAC" },
-  { icon: Fingerprint,  label: "Business Intent Validation" },
-  { icon: Atom,         label: "BB84 Quantum Key Exchange" },
-  { icon: ScanFace,     label: "Face Identity Verification" },
-];
-
 const BADGES = ["AES-256-GCM", "BB84 QUANTUM-SAFE", "RBAC ENFORCED", "FACE VERIFIED"];
-const DEPARTMENTS = [
-  "Retail Banking",
-  "Corporate Banking",
-  "Cyber Security",
-  "IT Operations",
-  "Internal Audit"
-];
 
-
-
-function AuthShell({ children, isLogin }) {
+function AuthShell({ children }) {
   return (
     <div className="auth-split">
       <div className="auth-side">
         <div className="auth-side-top">
           <div className="brand-icon large light"><ShieldHalf size={22} strokeWidth={2.2} /></div>
           <span className="auth-side-brand">CipherQ</span>
-          <span className="auth-side-tag">{isLogin ? "CipherQ Banking Insider Threat Detection Platform" : "Banking Security Platform"}</span>
+          <span className="auth-side-tag">FinSpark Employee Portal</span>
         </div>
 
         <h2 className="auth-side-heading">
-          {isLogin
-            ? "Privileged-access security for banking systems, verified at every step."
-            : "Zero-Trust Banking Security, Verified Before Every Privileged Action."}
+          Privileged-access security for banking systems, verified at every step.
         </h2>
         <p className="auth-side-copy">
-          {isLogin
-            ? "Every request to a protected banking resource is checked against your role, your declared intent, and your identity — before it's ever granted."
-            : "Every privileged request is verified using role-based authorization, business intent validation, BB84 quantum key exchange, adaptive risk scoring, and face identity verification before access is granted."}
+          Every request to a protected banking resource is checked against your role, your
+          declared intent, and your identity — before it's ever granted.
         </p>
 
         <ul className="auth-assurance-list">
-          {(isLogin ? LOGIN_ASSURANCES : REGISTER_ASSURANCES).map(a => (
+          {ASSURANCES.map(a => (
             <li key={a.label}>
               <span className="auth-assurance-icon"><a.icon size={16} strokeWidth={2} /></span>
               {a.label}
@@ -64,9 +45,7 @@ function AuthShell({ children, isLogin }) {
 
         <div className="auth-side-notice">
           <Lock size={13} strokeWidth={2.2} />
-          {isLogin
-            ? "For authorized FinSpark personnel only. All access is logged and monitored."
-            : "For authorized banking personnel only. Every privileged action is securely logged and monitored."}
+          For authorized FinSpark personnel only. All access is logged and monitored.
         </div>
       </div>
 
@@ -80,20 +59,15 @@ function AuthShell({ children, isLogin }) {
 export default function AuthPage({ mode, saveAuth, navigate }) {
   const isLogin = mode === "login";
   const [stage, setStage] = useState("credentials"); // credentials | face | done
- // const [form, setForm] = useState({ username:"", email:"", password:"", department:"" });
- const [form, setForm] = useState({
-  username: "",
-  email: "",
-  password: "",
-  department: ""
-});
- 
+  const [form, setForm] = useState({ username:"", email:"", password:"", department:"" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [pendingAuth, setPendingAuth] = useState(null); // {token,user} while offering face enrollment
   const [showPw, setShowPw] = useState(false);
   const [remember, setRemember] = useState(true);
   const [forgotNote, setForgotNote] = useState(false);
+  const [faceError, setFaceError] = useState("");
+  const [faceCaptureKey, setFaceCaptureKey] = useState(0); // bump to remount FaceCapture (restarts the camera) after a rejected attempt
 
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -122,32 +96,52 @@ export default function AuthPage({ mode, saveAuth, navigate }) {
   };
 
   const finishWithFace = async (result) => {
+    // The account itself is already created at this point (register()
+    // ran on the credentials step) — enrollment is a separate, optional
+    // follow-up call, so a rejected face must never block sign-in. On
+    // failure (e.g. this face is already enrolled on another account)
+    // we sign the person into the account they already have, but stay
+    // on this screen and explain why enrollment specifically didn't
+    // happen, instead of silently discarding the error.
     saveAuth(pendingAuth.token, pendingAuth.user);
-    try { await faceEnroll(result.descriptor); } catch (e) { /* non-fatal — can enroll later */ }
+    try {
+      await faceEnroll(result.descriptor);
+      navigate("dashboard");
+    } catch (e) {
+      setFaceError(e.message || "Face enrollment failed.");
+      setFaceCaptureKey(k => k + 1); // remount FaceCapture so the camera restarts for a retry
+    }
+  };
+
+  const skipFace = () => {
+    saveAuth(pendingAuth.token, pendingAuth.user);
     navigate("dashboard");
   };
 
   if (stage === "face") {
     return (
-      <AuthShell isLogin={isLogin}>
+      <AuthShell>
         <div className="auth-header auth-header-left">
-          <h2>Mandatory Face Identity Verification</h2>
-          <p>Face Identity Verification is mandatory before access to any protected banking resource. CipherQ verifies every privileged access request using facial identity verification as part of its Zero-Trust Banking Security model.</p>
+          <h2>Enroll face identity</h2>
+          <p>Required before you can send or open Protected Records — CipherQ verifies this on every transfer, in both directions. You can also do this later from Account & Security.</p>
         </div>
+        {faceError && <div className="err" style={{marginBottom:14}}>⚠ {faceError}</div>}
         <FaceCapture
-          buttonLabel="Verify Face & Continue"
+          key={faceCaptureKey}
+          buttonLabel="Enroll Face"
           subtitle="Look directly at the camera in good lighting. Only a mathematical face descriptor is stored — never the image itself."
           onCapture={finishWithFace}
         />
+        <p className="auth-switch"><button className="link-btn" onClick={skipFace}>Skip for now →</button></p>
       </AuthShell>
     );
   }
 
   return (
-    <AuthShell isLogin={isLogin}>
+    <AuthShell>
       <div className="auth-header auth-header-left">
-        <h2>{isLogin ? "Sign in to CipherQ" : "Create your CipherQ Banking Account"}</h2>
-        <p>{isLogin ? "Secure access to the CipherQ Banking Insider Threat Detection Platform." : "Create a banking employee account to securely access protected banking resources."}</p>
+        <h2>{isLogin ? "Sign in to CipherQ" : "Create your CipherQ account"}</h2>
+        <p>{isLogin ? "Secure access to FinSpark's insider threat detection & privileged-access platform" : "Register as a Bank Employee to request access to protected banking resources"}</p>
       </div>
 
       <form onSubmit={submitCredentials}>
@@ -163,27 +157,13 @@ export default function AuthPage({ mode, saveAuth, navigate }) {
               onChange={set("email")} required />
           </div>
         )}
-       {!isLogin && (
-  <div className="fg">
-    <label>Department</label>
-
-    <select
-      value={form.department}
-      onChange={set("department")}
-      required
-    >
-      <option value="">Select Department</option>
-
-      {DEPARTMENTS.map(dep => (
-        <option key={dep} value={dep}>
-          {dep}
-        </option>
-      ))}
-    </select>
-  </div>
-)}
-
-
+        {!isLogin && (
+          <div className="fg">
+            <label>Department (optional)</label>
+            <input type="text" placeholder="e.g. Retail Banking, Consumer Lending…" value={form.department}
+              onChange={set("department")} />
+          </div>
+        )}
         <div className="fg">
           <label>Password</label>
           <div className="auth-pw-wrap">
@@ -209,8 +189,8 @@ export default function AuthPage({ mode, saveAuth, navigate }) {
         )}
         {isLogin && forgotNote && (
           <div className="note" style={{ marginTop: -8, marginBottom: 16 }}>
-            Password resets for CipherQ accounts require Security Administrator approval and are subject to audit logging.
-            Contact Information Security to request a credential reset.
+            Password resets for CipherQ accounts are handled by your Security Administrator —
+            contact Information Security to reset your credentials.
           </div>
         )}
         {error && <div className="err">⚠ {error}</div>}

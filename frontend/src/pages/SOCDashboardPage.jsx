@@ -200,8 +200,9 @@ export default function SOCDashboardPage() {
           <h2>Users &amp; Roles</h2>
           {isSystemAdmin && (
             <p style={{color:"var(--text2)",marginTop:-4,marginBottom:12,fontSize:13}}>
-              As SYSTEM_ADMIN you can promote or change any user's role below. Self-service registration always
-              starts a user at BANK_EMPLOYEE — this is the only way to grant an elevated role afterward.
+              As SYSTEM_ADMIN you can promote or change any user's role below — pick a new role next to
+              their username, then Save. Self-service registration always starts a user at BANK_EMPLOYEE —
+              this is the only way to grant an elevated role afterward.
             </p>
           )}
           <div className="log-wrap">
@@ -210,22 +211,16 @@ export default function SOCDashboardPage() {
                 <tr>
                   <th>Username</th><th>Role</th><th>Department</th><th>Privilege</th>
                   <th>Face Enrolled</th><th>Since</th>
-                  {isSystemAdmin && <th>Change Role</th>}
                 </tr>
               </thead>
               <tbody>
-                {users === null && <tr><td colSpan={isSystemAdmin ? 7 : 6} className="empty-t">Loading…</td></tr>}
+                {users === null && <tr><td colSpan={6} className="empty-t">Loading…</td></tr>}
                 {users?.map(u => (
                   <tr key={u.id}>
                     <td>{u.username}</td>
-                    <td style={{textTransform:"capitalize"}}>{u.role.replace(/_/g," ").toLowerCase()}</td>
-                    <td>{u.department}</td>
-                    <td><span className="badge b-info">L{u.privilege_level}</span></td>
-                    <td>{u.face_enrolled ? <span className="badge b-success">✓ Enrolled</span> : <span className="badge b-warning">Not enrolled</span>}</td>
-                    <td className="mono">{new Date(u.created_at).toLocaleDateString()}</td>
-                    {isSystemAdmin && (
-                      <td>
-                        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <td>
+                      {isSystemAdmin ? (
+                        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
                           <select
                             value={pendingRole[u.id] ?? u.role}
                             onChange={e => setPendingRole(prev => ({ ...prev, [u.id]: e.target.value }))}
@@ -235,18 +230,25 @@ export default function SOCDashboardPage() {
                               <option key={r} value={r}>{r.replace(/_/g," ")}</option>
                             ))}
                           </select>
-                          <button
-                            className="btn btn-violet btn-xs"
-                            disabled={!pendingRole[u.id] || pendingRole[u.id] === u.role || savingId === u.id}
-                            onClick={() => saveRole(u.id)}
-                          >
-
-                            {savingId === u.id ? "Saving…" : "Save"}
-                          </button>
+                          {pendingRole[u.id] && pendingRole[u.id] !== u.role && (
+                            <button
+                              className="btn btn-violet btn-xs"
+                              disabled={savingId === u.id}
+                              onClick={() => saveRole(u.id)}
+                            >
+                              {savingId === u.id ? "Saving…" : "Save"}
+                            </button>
+                          )}
                         </div>
-                        {rowError[u.id] && <div style={{color:"var(--danger, #c1473a)",fontSize:11,marginTop:4}}>{rowError[u.id]}</div>}
-                      </td>
-                    )}
+                      ) : (
+                        <span style={{textTransform:"capitalize"}}>{u.role.replace(/_/g," ").toLowerCase()}</span>
+                      )}
+                      {rowError[u.id] && <div style={{color:"var(--danger, #c1473a)",fontSize:11,marginTop:4}}>{rowError[u.id]}</div>}
+                    </td>
+                    <td>{u.department}</td>
+                    <td><span className="badge b-info">L{u.privilege_level}</span></td>
+                    <td>{u.face_enrolled ? <span className="badge b-success">✓ Enrolled</span> : <span className="badge b-warning">Not enrolled</span>}</td>
+                    <td className="mono">{new Date(u.created_at).toLocaleDateString()}</td>
                   </tr>
                 ))}
               </tbody>

@@ -103,15 +103,28 @@ export default function AccessRequestPage({ user }) {
 
       // ── RBAC / Privilege Validation — runs immediately after business
       // intent is declared, BEFORE any intent binding / quantum / risk
-      // work begins. A denial here stops the workflow right away. ──
-      mark("rbac", "active");
-      setLL("Validating role-based access and privilege level…");
-      const rbac = await rbacValidate({ resource, operation, business_intent: businessIntent.trim() });
-      if (!rbac.allowed) {
-        mark("rbac", "fail");
-        return blockAndStop(rbac.reason || "RBAC/privilege validation denied this request.");
+      // work begins. A denial here stops the workflow right away.
+      //
+      // POST /api/rbac/validate is SYSTEM_ADMIN-only (it's an explicit
+      // preview/diagnostic step). Non-admin roles skip straight to intent
+      // binding — this does NOT weaken enforcement: /api/access-requests
+      // independently re-validates RBAC from scratch for every role
+      // regardless, so a non-admin whose role/privilege doesn't cover this
+      // resource+operation is still denied, just at the final decision
+      // stage instead of this earlier preview stage. ──
+      const isAdmin = user?.role === "SYSTEM_ADMIN";
+      if (isAdmin) {
+        mark("rbac", "active");
+        setLL("Validating role-based access and privilege level…");
+        const rbac = await rbacValidate({ resource, operation, business_intent: businessIntent.trim() });
+        if (!rbac.allowed) {
+          mark("rbac", "fail");
+          return blockAndStop(rbac.reason || "RBAC/privilege validation denied this request.");
+        }
+        mark("rbac", "pass");
+      } else {
+        mark("rbac", "pass");
       }
-      mark("rbac", "pass");
 
       mark("intent", "active");
       setLL("Binding business intent…");

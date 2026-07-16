@@ -9,7 +9,14 @@ function headers() {
 async function request(path, options = {}) {
   const res  = await fetch(`${BASE_URL}${path}`, { headers: headers(), ...options });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  // Most endpoints put their failure message in `error`, but several
+  // domain-decision endpoints (open-protected-record, verify-session,
+  // validate-intent, rbac/validate, access-requests) return it in `reason`
+  // instead (e.g. {"access":"DENIED","reason":"..."} on a 403). This only
+  // checked `error`, so those specific messages were silently dropped in
+  // favor of a bare "HTTP 403" whenever a caller relied on the thrown
+  // Error's .message (e.g. ReceivedRecordsPage's "Access Denied" card).
+  if (!res.ok) throw new Error(data.error || data.reason || `HTTP ${res.status}`);
   return data;
 }
 

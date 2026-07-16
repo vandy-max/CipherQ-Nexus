@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "./hooks/useAuth";
+import { verifySession } from "./services/api";
 import LandingPage           from "./pages/LandingPage";
 import AuthPage              from "./pages/AuthPage";
 import Dashboard              from "./pages/Dashboard";
@@ -15,10 +16,32 @@ import Header                  from "./components/Header";
 const SOC_ROLES = ["SECURITY_ANALYST", "SYSTEM_ADMIN", "DATABASE_ADMIN", "AUDITOR"];
 
 export default function App() {
-  const { token, user, saveAuth, logout, isAuthenticated } = useAuth();
+  const { token, user, saveAuth, logout, updateUser, isAuthenticated } = useAuth();
   const [page, setPage] = useState("landing");
   const [collapsed, setCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // The `user` object (and its `role`) is a snapshot taken at login time.
+  // If a SYSTEM_ADMIN changes this user's role while they're still logged
+  // in, that snapshot goes stale — the backend already re-checks the DB on
+  // every request (see auth_required in app.py), but the frontend's page
+  // gating below (SOC_ROLES.includes(user?.role), Sidebar links, etc.) was
+  // still reading the old role until a full logout/login. Resync it here:
+  // once on mount, and again whenever the tab regains focus, so a promotion
+  // or demotion applies without forcing a re-login.
+  const refreshUser = useCallback(() => {
+    if (!isAuthenticated) return;
+    verifySession()
+      .then(({ user: fresh }) => { if (fresh) updateUser(fresh); })
+      .catch(() => { /* non-fatal — keep the cached user, next request will still be enforced server-side */ });
+  }, [isAuthenticated, updateUser]);
+
+  useEffect(() => { refreshUser(); }, [refreshUser]);
+  useEffect(() => {
+    const onFocus = () => refreshUser();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshUser]);
 
   const navigate = p => {
     if (!isAuthenticated && !["landing","login","register"].includes(p)) {
