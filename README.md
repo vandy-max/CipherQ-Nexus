@@ -42,17 +42,17 @@ Traditional banking access control stops at "is this the right role?" That leave
 ## Screenshots
 
 <p align="center">
-  <img src="Login.png" alt="Login / Register" width="800"><br>
+  <img src="Login.png" alt="Login / Register" width="500"><br>
   <sub><i>Login — Okta/Entra-style split layout with the live security pipeline described alongside the form</i></sub>
 </p>
 
 <p align="center">
-  <img src="dashboard.png" alt="Dashboard" width="800"><br>
+  <img src="dashboard.png" alt="Dashboard" width="500"><br>
   <sub><i>Dashboard — role, department, privilege level, quantum channel integrity, and recent activity</i></sub>
 </p>
 
 <p align="center">
-  <img src="access.png" alt="Access Request" width="800"><br>
+  <img src="access.png" alt="Access Request" width="500"><br>
   <sub><i>Access Request — resource + operation selection, business intent, and the live verification pipeline</i></sub>
 </p>
 
