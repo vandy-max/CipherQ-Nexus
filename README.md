@@ -368,7 +368,9 @@ The backend is a standard Flask app (`app.py`) reading config from environment v
 
 **Qiskit Aer note:** `qiskit-aer` is a heavier, platform-specific dependency (larger wheel, longer build). Standard Python buildpacks on Render/Railway/Fly install it fine from PyPI wheels on their default Linux images — no extra system packages are needed — but the first deploy's build step will take noticeably longer than a typical Flask app because of it. There is no computer-vision Python dependency to worry about — face detection/embedding runs entirely client-side via face-api.js in the browser (see `frontend/public/models/`); the backend never processes images.
 
-###3 - A static Vite build (`npm run build` → `dist/`) — deploy to **Render**, **Vercel**, **Netlify**, or any static host / CDN.
+### 3 — Frontend (pick one)
+
+A static Vite build (`npm run build` → `dist/`) — deploy to **Vercel**, **Render**, or any static host / CDN.
 
 **Example — Render (Static Site):**
 
